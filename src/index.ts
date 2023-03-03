@@ -1,5 +1,6 @@
 import express from 'express';
-import { WebhookRequestBody, Client, middleware } from '@line/bot-sdk';
+import { WebhookRequestBody, Client, middleware, WebhookEvent } from '@line/bot-sdk';
+import { getChatCompletions } from './openai';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -11,18 +12,34 @@ const config = {
 
 const client = new Client(config);
 
-app.post('/callback', middleware(config), async (req, res) => {
+async function handleEvent(event: WebhookEvent) {
+  if (!(event.type === 'message' && event.message.type === 'text')) {
+    return;
+  }
+
+  const {choices: [{message: {content}}]} = await getChatCompletions([
+    {
+      role: 'system',
+      content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
+    },
+    {
+      role: 'user',
+      content: event.message.text,
+    },
+  ]);
+
+  await client.replyMessage(event.replyToken, {
+    type: 'text',
+    text: content.trim(),
+  });
+}
+
+app.post('/callback', middleware(config), (req, res) => {
   const body: WebhookRequestBody = req.body;
 
   // Process each event in the body of the webhook request
   for (const event of body.events) {
-    if (event.type === 'message' && event.message.type === 'text') {
-      // Send a message echoing the user's message back to them
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: event.message.text,
-      });
-    }
+    handleEvent(event);
   }
 
   // Respond with a 200 OK status code to acknowledge receipt of the webhook event
