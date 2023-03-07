@@ -19,34 +19,50 @@ async function handleEvent(event: WebhookEvent) {
     return;
   }
 
-  await collection.messages.insertOne({
+  // Record user text in DB
+  //
+  const {insertedId: messageIdInDb} = await collection.messages.insertOne({
     userId: event.source.userId ?? '',
     text: event.message.text,
     createdAt: new Date(),
     status: 'PENDING',
   });
 
-  const {data: {choices: [{message}]}} = await openai.createChatCompletion({
-    model: 'gpt-3.5-turbo',
-    messages: [
-      {
-        role: 'system',
-        content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
-      },
-      {
-        role: 'user',
-        content: event.message.text,
-      },
-    ]
-  });
-
-  const resp = message?.content.trim();
-
-  if(resp) {
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: resp,
+  try {
+    const {data: {choices: [{message}]}} = await openai.createChatCompletion({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: 'system',
+          content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
+        },
+        {
+          role: 'user',
+          content: event.message.text,
+        },
+      ]
     });
+
+    const resp = message?.content.trim();
+
+    // Record response in DB
+    if(resp) {
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: resp,
+      });
+    }
+    await collection.messages.updateOne(
+      {_id: messageIdInDb},
+      {$set: {updatedAt: new Date(), status: 'REPLIED', response: resp}}
+    );
+
+  } catch(e) {
+    console.error(e);
+    collection.messages.updateOne(
+      {_id: messageIdInDb},
+      {$set: {updatedAt: new Date(), status: 'ERROR', response: e.message}}
+    );
   }
 }
 
