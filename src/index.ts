@@ -1,6 +1,6 @@
 import express from 'express';
 import { WebhookRequestBody, Client, middleware, WebhookEvent } from '@line/bot-sdk';
-import { getChatCompletions } from './openai';
+import openai from './openai';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -17,21 +17,28 @@ async function handleEvent(event: WebhookEvent) {
     return;
   }
 
-  const {choices: [{message: {content}}]} = await getChatCompletions([
-    {
-      role: 'system',
-      content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
-    },
-    {
-      role: 'user',
-      content: event.message.text,
-    },
-  ]);
-
-  await client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: content.trim(),
+  const {data: {choices: [{message}]}} = await openai.createChatCompletion({
+    model: 'gpt-3.5-turbo',
+    messages: [
+      {
+        role: 'system',
+        content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
+      },
+      {
+        role: 'user',
+        content: event.message.text,
+      },
+    ]
   });
+
+  const resp = message?.content.trim();
+
+  if(resp) {
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: resp,
+    });
+  }
 }
 
 app.post('/callback', middleware(config), (req, res) => {
@@ -39,6 +46,7 @@ app.post('/callback', middleware(config), (req, res) => {
 
   // Process each event in the body of the webhook request
   for (const event of body.events) {
+    // No need to await
     handleEvent(event);
   }
 
