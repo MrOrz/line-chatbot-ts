@@ -1,6 +1,8 @@
 import express from 'express';
 import { WebhookRequestBody, Client, middleware, WebhookEvent } from '@line/bot-sdk';
+
 import openai from './openai';
+import { client as mongoClient, collection } from './db';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -16,6 +18,13 @@ async function handleEvent(event: WebhookEvent) {
   if (!(event.type === 'message' && event.message.type === 'text')) {
     return;
   }
+
+  await collection.messages.insertOne({
+    userId: event.source.userId ?? '',
+    text: event.message.text,
+    createdAt: new Date(),
+    status: 'PENDING',
+  });
 
   const {data: {choices: [{message}]}} = await openai.createChatCompletion({
     model: 'gpt-3.5-turbo',
@@ -56,4 +65,8 @@ app.post('/callback', middleware(config), (req, res) => {
 
 app.listen(port, () => {
   console.log(`Webhook server is listening on port ${port}`);
+});
+
+mongoClient.connect().then(() => {
+  console.log('Connected to mongodb');
 });
