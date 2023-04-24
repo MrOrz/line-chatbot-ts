@@ -23,6 +23,14 @@ async function handleEvent(event: WebhookEvent) {
     return;
   }
 
+  // Message is received, set status of pending messages to superseded
+  await collection.messages.updateMany({
+    userId: event.source.userId ?? '',
+    status: 'PENDING'
+  }, {
+    $set: {status: 'SUPERSEDED'}
+  });
+
   // Get history
   const prevMessages = (
     await collection.messages.find({userId: event.source.userId ?? ''})
@@ -48,7 +56,9 @@ async function handleEvent(event: WebhookEvent) {
         role: 'user',
         content: msg.text,
       }];
-      if(msg.response) messages.push({
+
+      // If response is shown to the user, add response
+      if(msg.response && msg.status === 'REPLIED') messages.push({
         role: 'assistant',
         content: msg.response,
       });
@@ -71,18 +81,26 @@ async function handleEvent(event: WebhookEvent) {
 
     const resp = message?.content.trim();
 
+    if(!resp) throw new Error('API return empty result');
+
     // Record response in DB
-    if(resp) {
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: resp,
-      });
-    }
-    await collection.messages.updateOne(
-      {_id: messageIdInDb},
+    // Only reply when message is pending.
+    const { modifiedCount } = await collection.messages.updateOne(
+      {_id: messageIdInDb, status: 'PENDING'},
       {$set: {updatedAt: new Date(), status: 'REPLIED', response: resp}}
     );
+
+    if(modifiedCount !== 1) {
+      console.log(`Message ${messageIdInDb} is already superseded, reply not written.`);
+      return;
+    }
+
     console.log(`Response written to: ${messageIdInDb}`);
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: resp,
+    });
 
   } catch(e) {
     console.error('Response error', e);
