@@ -26,6 +26,9 @@ export type Message = {
 
   /** The last update time of the message */
   updatedAt?: Date;
+
+  /** If preset, the message is selected to be compressed. */
+  compressionStartedAt?: Date;
 }
 
 export const collection = {

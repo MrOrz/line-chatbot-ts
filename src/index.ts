@@ -5,9 +5,13 @@ import { WebhookRequestBody, Client, middleware, WebhookEvent } from '@line/bot-
 import openai from './openai';
 import { client as mongoClient, collection } from './db';
 import { ChatCompletionRequestMessage } from 'openai';
+import { compressMessagesIfNecessary, dbMessageToChatMessage } from "./lib";
 
 const app = express();
 const port = process.env.PORT || 5000;
+
+/** Number of messages to consider at most. */
+const MAX_HISTORY_LENGTH = 10;
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN || '',
@@ -15,9 +19,6 @@ const config = {
 };
 
 const client = new Client(config);
-
-const HISTORY_LENGTH = 3;
-
 async function handleEvent(event: WebhookEvent) {
   if (!(event.type === 'message' && event.message.type === 'text')) {
     return;
@@ -34,8 +35,10 @@ async function handleEvent(event: WebhookEvent) {
   // Get history
   const prevMessages = (
     await collection.messages.find({userId: event.source.userId ?? ''})
-      .sort({createdAt: -1}).limit(HISTORY_LENGTH).toArray()
+      .sort([['createdAt', 'desc'], ['_id', 'desc']]).limit(MAX_HISTORY_LENGTH).toArray()
   ).reverse();
+
+  compressMessagesIfNecessary(prevMessages);
 
   // Record user text in DB
   //
@@ -51,20 +54,7 @@ async function handleEvent(event: WebhookEvent) {
       role: 'system',
       content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
     },
-    ...prevMessages.flatMap(msg => {
-      const messages: ChatCompletionRequestMessage[] = [{
-        role: 'user',
-        content: msg.text,
-      }];
-
-      // If response is shown to the user, add response
-      if(msg.response && msg.status === 'REPLIED') messages.push({
-        role: 'assistant',
-        content: msg.response,
-      });
-
-      return messages;
-    }),
+    ...prevMessages.flatMap(dbMessageToChatMessage),
     {
       role: 'user',
       content: event.message.text,
