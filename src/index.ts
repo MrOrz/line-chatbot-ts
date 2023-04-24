@@ -1,4 +1,3 @@
-import "@total-typescript/ts-reset";
 import express from 'express';
 import { WebhookRequestBody, Client, middleware, WebhookEvent } from '@line/bot-sdk';
 
