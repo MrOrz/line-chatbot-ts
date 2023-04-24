@@ -8,13 +8,13 @@ import openai from "./openai";
 const MAX_HISTORY_WORD_COUNT = 500;
 
 /** Number of words to compress the history to */
-const MAX_COMPRESSED_WORD_COUNT = 50;
+const MAX_COMPRESSED_WORD_COUNT = 100;
 
 /**
  * Number of replied conversations that do not compress.
  * These conversations are sent to ChatGPT without compression.
  */
-const UNCOMPRESSD_CONVERSATION_COUNT = 1;
+const UNCOMPRESSD_CONVERSATION_COUNT = 2;
 
 export function dbMessageToChatMessage(msg: Message): ChatCompletionRequestMessage[] {
   const messages: ChatCompletionRequestMessage[] = [{
@@ -85,15 +85,15 @@ export async function compressMessagesIfNecessary(prevMessages: WithId<Message>[
 
   const {data: {choices: [{message}]}} = await openai.createChatCompletion({
     model: 'gpt-3.5-turbo',
+    temperature: 0,
     messages: [
       ...chatMessagesToCompress,
       {
         role: 'user',
         content: `
-請縮短並改寫以上對話紀錄，使總字數不超過${MAX_COMPRESSED_WORD_COUNT}字。輸出的對話應是一合法 JSON 陣列，格式如下所示，JSON 陣列中可包含回傳一至多個對話。除 JSON 之外，不要輸出解釋。
+請改寫以上的對話紀錄，使總字數不超過${MAX_COMPRESSED_WORD_COUNT}字。輸出應是一合法 JSON 陣列，格式如下所示。JSON 陣列中可以有多個對話。不要輸出解釋。
 
-[{"user": "{{User 的對話摘要}}", "assistant": "{{Assistant 的對話摘要}}"}]
-        `,
+[{"user": "{{User 的對話摘要}}", "assistant": "{{Assistant 的對話摘要}}"}]`,
       }
     ]
   });
@@ -119,7 +119,7 @@ export async function compressMessagesIfNecessary(prevMessages: WithId<Message>[
         updatedAt: lastMessageToCompress.updatedAt,
       }))
     );
-    await collection.messages.deleteMany({ id: {$in: chatMessageIds} });
+    await collection.messages.deleteMany({ _id: {$in: chatMessageIds} });
   } catch(e) {
     console.error('Error parsing compression response', e);
     // Reset summarizing flag
