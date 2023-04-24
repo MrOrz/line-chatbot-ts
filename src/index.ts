@@ -1,8 +1,10 @@
+import "@total-typescript/ts-reset";
 import express from 'express';
 import { WebhookRequestBody, Client, middleware, WebhookEvent } from '@line/bot-sdk';
 
 import openai from './openai';
 import { client as mongoClient, collection } from './db';
+import { ChatCompletionRequestMessage } from 'openai';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -14,10 +16,18 @@ const config = {
 
 const client = new Client(config);
 
+const HISTORY_LENGTH = 3;
+
 async function handleEvent(event: WebhookEvent) {
   if (!(event.type === 'message' && event.message.type === 'text')) {
     return;
   }
+
+  // Get history
+  const prevMessages = (
+    await collection.messages.find({userId: event.source.userId ?? ''})
+      .sort({createdAt: -1}).limit(HISTORY_LENGTH).toArray()
+  ).reverse();
 
   // Record user text in DB
   //
@@ -28,19 +38,35 @@ async function handleEvent(event: WebhookEvent) {
     status: 'PENDING',
   });
 
+  const messages: ChatCompletionRequestMessage[] = [
+    {
+      role: 'system',
+      content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
+    },
+    ...prevMessages.flatMap(msg => {
+      const messages: ChatCompletionRequestMessage[] = [{
+        role: 'user',
+        content: msg.text,
+      }];
+      if(msg.response) messages.push({
+        role: 'assistant',
+        content: msg.response,
+      });
+
+      return messages;
+    }),
+    {
+      role: 'user',
+      content: event.message.text,
+    },
+  ];
+
+  console.log('Input messages', {messages});
   try {
+
     const {data: {choices: [{message}]}} = await openai.createChatCompletion({
       model: 'gpt-3.5-turbo',
-      messages: [
-        {
-          role: 'system',
-          content: '你是一位說繁體中文的鼓勵師，會友善、誠懇、簡短而堅定地鼓勵使用者，不吝於稱讚使用者、跟他們說他們很棒。'
-        },
-        {
-          role: 'user',
-          content: event.message.text,
-        },
-      ]
+      messages
     });
 
     const resp = message?.content.trim();
@@ -56,9 +82,10 @@ async function handleEvent(event: WebhookEvent) {
       {_id: messageIdInDb},
       {$set: {updatedAt: new Date(), status: 'REPLIED', response: resp}}
     );
+    console.log(`Response written to: ${messageIdInDb}`);
 
   } catch(e) {
-    console.error(e);
+    console.error('Response error', e);
     collection.messages.updateOne(
       {_id: messageIdInDb},
       {$set: {updatedAt: new Date(), status: 'ERROR', response: e.message}}
